@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Yahoo Gamelog Silencer
 // @namespace    http://tampermonkey.net/
-// @version      0.1
+// @version      0.2
 // @description  try to take over the world!
 // @author       You
 // @match        https://gamelog-games.yahoo.co.jp/game/top/*/*
@@ -16,10 +16,24 @@
 (function() {
     'use strict';
 
+    //新着と見なす期間(日数)
+    const fresh_period = 3;
+
+    //画像の縮小率
+    const image_shrink_ratio = "25%";
+
+    //非表示スレッド・コメントの背景色
+    const muted_color = "gray";
+
+    //古いコメントの背景色
+    const old_color = "silver";
+
+    //デバッグモード
+    const debug_mode = false;
+
     const debug = {
-        debug_mode: false
-      , log: function(...args) {
-            if (!debug.debug_mode) return
+        log: function(...args) {
+            if (!debug_mode) return
             console.log(`[DEBUG]${GM_info.script.name}:`, ...args)
         }
     }
@@ -175,7 +189,7 @@
           })
       }
       function add_style(){
-          GM_addStyle('.muted_thread, .muted_comment, .muted_user {background-color: gray !important;}')
+          GM_addStyle(`.muted_thread, .muted_comment, .muted_user {background-color: ${muted_color} !important;}`)
           GM_addStyle('.mute_on .muted_thread, .mute_on .muted_comment, .mute_on .muted_user {display: none !important;}')
           GM_addStyle('.muted_thread .mute_thread, .muted_comment .mute_comment, .muted_user .mute_user {color: brown !important;}')
           GM_addStyle('.mute_thread .check_mark, .mute_comment .check_mark, .mute_user .check_mark {visibility: hidden !important;}')
@@ -265,13 +279,100 @@
       }
     }
 
+    // Time Filter
+    // timefilter[key].mute(days)
+    const timefilter = (function() {
+      const actions = Object.freeze({
+          mute: Symbol("mute")
+      })
+
+      const is_old = (element, days) => {
+          return element.getAttribute('data-timestamp') * 1000 < new Date().setDate(new Date().getDate() - days)
+      }
+
+      const is_thread_old = (days) => (x) => {
+        var element = x.querySelector('.gmTBallUserNameOwner > .name > .time');
+        return element ? is_old(element, days) : false
+      }
+
+      const is_last_comment_old = (days) => (x) => {
+        var element = x.querySelector('.gmTBallUserNameres > .timeRankArea > .time');
+        return element ? is_old(element, days) : true
+      }
+
+      const action_config = {
+        comment: {
+          class_name: 'old_comment'
+          , selector: () => '.gml-del-head:not(.gmTthreadSet) > .gmTBallUserNameres > .timeRankArea > .time'
+          , filter: (days) => (x) => {
+              return is_old(x, days)
+            }
+          , mapper: (x) => {return x.closest('.gml-del-head')}
+        }
+
+        , thread: {
+          class_name: 'old_thread'
+          , selector: () => '.gmTthreadSet'
+          , filter: (days) => (x) => {
+              return is_thread_old(days)(x) && is_last_comment_old(days)(x)
+            }
+          , mapper: (x) => {return x.closest('.gmTthreadSet')}
+        }
+      }
+
+
+
+      const makeAction = (config) => (action) => (days) =>{
+        Array.from(document.querySelectorAll(config.selector()))
+          .filter(config.filter(days))
+          .map(config.mapper)
+          .forEach(i=>{
+            switch (action) {
+              case actions.mute:
+                i.classList.add(config.class_name)
+                break;
+            }
+          })
+      }
+
+      return {
+        old_comment: {
+          mute: makeAction(action_config.comment)(actions.mute)
+        }
+      , old_thread: {
+          mute: makeAction(action_config.thread,)(actions.mute)
+        }
+      }
+    })();
+
+    function mute_old(){
+      GM_addStyle(`.old_comment, .old_thread {background-color: ${old_color};}`)
+      GM_addStyle('.hide_old_on .old_comment, .hide_old_on .old_thread {display: none !important;}')
+
+      timefilter.old_comment.mute(fresh_period)
+      timefilter.old_thread.mute(fresh_period)
+    }
+
+    const trigger_load = (function () {
+        let num_before = 0;
+        return ({force=false}={}) => {
+            const num_after = document.querySelectorAll('.gml-del-head:not(.gmDthreadSet)').length
+            if (force || num_after >= num_before + 100){
+                debug.log("dispatch scroll event");
+                num_before = num_after;
+                window.dispatchEvent(new Event('scroll'));
+            }
+        }
+    })();
+
     //Top Bar Buttons
     const button_observer = new Set([])
 
     const button_state = (function(repository, observer){
         const inner_state = {
             mute: repository.get('mute', true)
-            , shrink: repository.get('shrink', true)
+          , shrink: repository.get('shrink', true)
+          , hide_old: repository.get('hide_old', true)
         }
 
         const state_handler = {
@@ -291,9 +392,13 @@
                    , label: "非表示"
                    , handler: toggle_mute
                   }
-            , shrink: { class_name: "shrink_button"
-                       , label: "画像縮小"
-                       , handler: toggle_shrink
+          , shrink: { class_name: "shrink_button"
+                    , label: "画像縮小"
+                    , handler: toggle_shrink
+                    }
+          , hide_old: { class_name: "hide_old_button"
+                      , label: "新着のみ"
+                      , handler: toggle_hide_old
                       }
         }
 
@@ -301,9 +406,11 @@
             debug.log("add_style called")
             GM_addStyle('.mute_on .mute_button > span {color: red !important;}')
             GM_addStyle('.mute_button > span {color: gray !important;}')
-            GM_addStyle('.shrink_on .userCommentImg {width: 25% !important;}')
+            GM_addStyle(`.shrink_on .userCommentImg {width: ${image_shrink_ratio} !important;}`)
             GM_addStyle('.shrink_on .shrink_button > span {color: red !important;}')
             GM_addStyle('.shrink_button > span {color: gray !important;}')
+            GM_addStyle('.hide_old_on .hide_old_button > span {color: red !important;}')
+            GM_addStyle('.hide_old_button > span {color: gray !important;}')
         }
 
         function toggle_mute(e) {
@@ -312,6 +419,13 @@
 
         function toggle_shrink(e) {
             button_state.shrink = !button_state.shrink
+        }
+
+        function toggle_hide_old(e) {
+            button_state.hide_old = !button_state.hide_old
+
+            //trigger loading in case there are no fresh comment loaded
+            setTimeout(()=>trigger_load({force:true}), 300)
         }
 
         function state_changed(key, state){
@@ -347,11 +461,6 @@
         }
     })(button_state, button_observer);
 
-    button.initialize()
-    mute_menu.add()
-    mute_all()
-    add_observers()
-
     //Apply mute after XHR loadend
     const original_open = XMLHttpRequest.prototype.open;
     XMLHttpRequest.prototype.open = function() {
@@ -360,8 +469,17 @@
             debug.log('AJAX request completed!');
             mute_menu.add()
             mute_all()
+            mute_old()
+            trigger_load()
         });
         original_open.apply(this, arguments);
     };
+
+    button.initialize()
+    mute_menu.add()
+    mute_all()
+    add_observers()
+    mute_old()
+    trigger_load()
 
 })();
