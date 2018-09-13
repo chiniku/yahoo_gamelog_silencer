@@ -6,7 +6,17 @@ Yahooゲームログのスレッドやコメントを非表示にするTampermon
 
 
 ## 使い方
-- 動画: https://streamable.com/ne19i
+- 特定のコメントやスレッドを選択して非表示にする機能
+  - 動画: https://streamable.com/ne19i 
+
+- 古いコメントやスレッドを非表示にする機能
+  - 動画: https://streamable.com/128r0
+  - 3日前以上のコメント、3日前以上のコメントしかないスレッドが対象
+  - もう少し期間を長くしたい場合は`const fresh_period = 3;`の箇所を変更
+
 
 ## 動作環境
-- Chrome + Tampermonkeyで動作確認
+- Chrome + Tampermonkey
+
+## Known Issue
+- スレッドの詳細画面で「新着のみOFF」から「新着ON」に変更した場合にロード中を示すインジケータが消えない場合がある
