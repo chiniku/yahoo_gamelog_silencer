@@ -296,7 +296,7 @@
       }
 
       const is_last_comment_old = (days) => (x) => {
-        var element = x.querySelector('.gmTBallUserNameres > .timeRankArea > .time');
+        var element = x.querySelector('.userComment > li:last-child > .gmTBallUserNameres > .timeRankArea > .time');
         return element ? is_old(element, days) : true
       }
 
